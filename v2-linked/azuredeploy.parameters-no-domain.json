@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "adminUsername": {
+      "value": "mqttboss"
+    },
+    "adminPassword": {
+      "value": "<admin password>"
+    },
+    "adminPublicKey": {
+      "reference": {
+        "keyVault": {
+          "id": "<resourceId of a keyvault  containing the admin public key>"
+        },
+        "secretName": "publicKeyMqtt"
+      }
+    },
+    "vmName": {
+      "value": "mq2"
+    },
+    "vmSize": {
+      "value": "Standard_B1s"
+    },
+    "hostname": {
+      "value": "<DNS prefix for the public IP >"
+    }
+  }
+}

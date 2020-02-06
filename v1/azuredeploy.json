@@ -1,0 +1,836 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-08-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "adminUsername": {
+            "type": "string",
+            "metadata": {
+                "description": "The name of the administrator of the new VM. Exclusion list: 'admin','administrator'"
+            }
+        },
+        "adminPassword": {
+            "type": "securestring",
+            "metadata": {
+                "description": "The password for the administrator account of the new VM"
+            }
+        },
+        "adminPublicKey": {
+            "type": "securestring",
+            "metadata": {
+                "description": "The public key for the administrator account of the new VM. For instruction see https://docs.microsoft.com/en-us/azure/virtual-machines/linux/ssh-from-windows#create-an-ssh-key-pair"
+            }
+        },
+        "vmName": {
+            "type": "string",
+            "metadata": {
+                "description": "The name of the of the new VM. Can be identical to the hostname value"
+            }
+        },
+        "hostname": {
+            "type": "string",
+            "metadata": {
+                "description": "The hostname of the of the new VM. A and AAAA records for this hostname are created in the DNS zone provided dnszone-resid paramter. This hostname is also used in the letsencrypt certificate request"
+            }
+        },
+        "letsencypt-account": {
+            "type": "string",
+            "metadata": {
+                "description": "Email used for registration and recovery contact with Letsencrypt. Use comma to register multiple emails, ex:  u1@example.com,u2@example.com."
+            }
+        },
+        "dnszone-resid": {
+            "type": "string",
+            "metadata": {
+                "description": "resourceId of your dns zone"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for all resources."
+            }
+        },
+        "VmSize": {
+            "type": "string",
+            "defaultValue": "Standard_B1s",
+            "metadata": {
+                "description": "The size of the VM"
+            }
+        }
+    },
+    "variables": {
+        "dnszone": "[skip(parameters('dnszone-resid'),add(1,lastIndexOf(parameters('dnszone-resid'),'/')))]"
+    },
+    "resources": [
+        {
+            "name": "createResources",
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2019-08-01",
+            "properties": {
+                "mode": "Incremental",
+                "expressionEvaluationOptions": {
+                    "scope": "inner"
+                },
+                "parameters": {
+                    "vmName": {
+                        "value": "[parameters('vmName')]"
+                    },
+                    "location": {
+                        "value": "[parameters('location')]"
+                    },
+                    "adminUsername": {
+                        "value": "[parameters('adminUsername')]"
+                    },
+                    "adminPassword": {
+                        "value": "[parameters('adminPassword')]"
+                    },
+                    "adminPublicKey": {
+                        "value": "[parameters('adminPublicKey')]"
+                    },
+                    "vmSize": {
+                        "value": "[parameters('vmSize')]"
+                    },
+                    "hostname": {
+                        "value": "[parameters('hostname')]"
+                    },
+                    "dnszone-resid": {
+                        "value": "[parameters('dnszone-resid')]"
+                    },
+                    "letsencypt-account": {
+                        "value": "[parameters('letsencypt-account')]"
+                    },
+                    "dnszone": {
+                        "value": "[variables('dnszone')]"
+                    }
+                },
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "adminUsername": {
+                            "type": "string"
+                        },
+                        "adminPassword": {
+                            "type": "securestring"
+                        },
+                        "adminPublicKey": {
+                            "type": "securestring"
+                        },
+                        "vmName": {
+                            "type": "string"
+                        },
+                        "vmSize": {
+                            "type": "string"
+                        },
+                        "hostname": {
+                            "type": "string"
+                        },
+                        "dnszone": {
+                            "type": "string"
+                        },
+                        "dnszone-resid": {
+                            "type": "string"
+                        },
+                        "letsencypt-account": {
+                            "type": "string"
+                        },
+                        "location": {
+                            "type": "string"
+                        }
+                    },
+                    "variables": {
+                        "url": "https://raw.githubusercontent.com/martgras/armdev/master/mqtt/azuredeploy.json?token=AGEOAXNDM7KCJR5ZNZDTWO26D3DKC",
+                        "vnetv4AddressRange": "10.0.0.0/16",
+                        "vnetv6AddressRange": "ace:cab:deca::/48",
+                        "subnetv4AddressRange": "10.0.0.0/24",
+                        "subnetv6AddressRange": "ace:cab:deca:deed::/64",
+                        "subnetName": "[concat(parameters('vmName'),'-subnet')]",
+                        "newStorageAccountName": "[substring(concat(replace(parameters('vmName'),'-',''),'storage', uniqueString(resourceGroup().id)),0,22)]",
+                        "subnet-id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'VNET', variables('subnetName'))]",
+                        "imagePublisher": "Canonical",
+                        "imageOffer": "UbuntuServer",
+                        "imageSku": "18.04-LTS",
+                        "lbpublicip-v4-Name": "[concat(parameters('vmName'),'-lbpubipv4')]",
+                        "lbpublicip-v6-Name": "[concat(parameters('vmName'),'-lbpubipv6')]",
+                        "nic0-publicip-v4-Name": "[concat(parameters('vmName'),'-nicpubipv4-0')]",
+                        "rg": "[resourceGroup().name]",
+                        "fqdn": "[concat(parameters('hostname'),'.',parameters('dnszone'))]",
+                        "cloudinit": "[replace(replace(replace(replace('#cloud-config\nhostname: $host\npackage_upgrade: true\npackages:\n  - curl\n  - apt-transport-https\n  - lsb-release\n  - gnupg\n  - mosquitto\n  - mosquitto-clients\n  - certbot\nwrite_files:\n  - owner: root:root\n    path: /etc/mosquitto/conf.d/default.conf\n    content: |\n      allow_anonymous true\n      password_file /etc/mosquitto/passwd\n\n      listener 1883 localhost\n\n      listener 8883\n      certfile /etc/letsencrypt/live/$fqdn/cert.pem\n      cafile /etc/letsencrypt/live/$fqdn/chain.pem\n      keyfile /etc/letsencrypt/live/$fqdn/privkey.pem\n\n      listener 8083\n      protocol websockets\n      certfile /etc/letsencrypt/live/$fqdn/cert.pem\n      cafile /etc/letsencrypt/live/$fqdn/chain.pem\n      keyfile /etc/letsencrypt/live/$fqdn/privkey.pem\n  - owner: root:root\n    path: /etc/letsencrypt/renewal-hooks/pre/enablehttp.sh\n    content: |\n      az login --identity\n      az network nsg rule update -g $rg --nsg-name mqttNsg --name HTTP --access Allow\n      sleep 30\n\n  - owner: root:root\n    path: /etc/letsencrypt/renewal-hooks/post/disablehttp.sh\n    content: |\n      az login --identity\n      az network nsg rule update -g $rg --nsg-name mqttNsg --name HTTP --access Deny\n      systemctl restart mosquitto\nruncmd:\n  - chmod +x /etc/letsencrypt/renewal-hooks/pre/enablehttp.sh\n  - chmod +x /etc/letsencrypt/renewal-hooks/post/disablehttp.sh\n  - curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash\n  - apt autoremove -y\n  - certbot certonly --non-interactive --agree-tos -m $email --standalone --preferred-challenges http -d $fqdn --dry-run\n  - /etc/letsencrypt/renewal-hooks/post/disablehttp.sh\n  - if [ -f /var/run/reboot-required ]; then reboot ; fi\n','$fqdn',variables('fqdn')),'$rg',variables('rg')),'$host',parameters('vmName')),'$email',parameters('letsencypt-account'))]"
+                    },
+                    "resources": [
+                        {
+                            "apiVersion": "2019-11-01",
+                            "type": "Microsoft.Network/publicIPAddresses",
+                            "name": "[variables('lbpublicip-v4-Name')]",
+                            "location": "[parameters('location')]",
+                            "properties": {
+                                "publicIPAllocationMethod": "Static",
+                                "publicIPAddressVersion": "IPv4"
+                            }
+                        },
+                        {
+                            "apiVersion": "2019-11-01",
+                            "type": "Microsoft.Network/publicIPAddresses",
+                            "name": "[variables('lbpublicip-v6-Name')]",
+                            "location": "[parameters('location')]",
+                            "properties": {
+                                "publicIPAllocationMethod": "Dynamic",
+                                "publicIPAddressVersion": "IPv6"
+
+                            }
+                        },
+                        {
+                            "apiVersion": "2019-11-01",
+                            "type": "Microsoft.Network/publicIPAddresses",
+                            "name": "[variables('nic0-publicip-v4-Name')]",
+                            "location": "[parameters('location')]",
+                            "properties": {
+                                "publicIPAllocationMethod": "Static",
+                                "publicIPAddressVersion": "IPv4"
+                            }
+                        },
+                        {
+                            "apiVersion": "2019-04-01",
+                            "type": "Microsoft.Storage/storageAccounts",
+                            "name": "[variables('newStorageAccountName')]",
+                            "location": "[parameters('location')]",
+                            "sku": {
+                                "name": "Standard_LRS"
+                            },
+                            "kind": "StorageV2",
+                            "properties": {
+                            }
+                        },
+                        {
+                            "apiVersion": "2019-11-01",
+                            "name": "loadBalancer",
+                            "type": "Microsoft.Network/loadBalancers",
+                            "location": "[parameters('location')]",
+                            "dependsOn": [
+                                "[resourceId('Microsoft.Network/publicIPAddresses',variables('lbpublicip-v6-Name'))]",
+                                "[resourceId('Microsoft.Network/publicIPAddresses',variables('lbpublicip-v4-Name'))]"
+                            ],
+                            "properties": {
+                                "frontendIpConfigurations": [
+                                    {
+                                        "name": "LBFE-v4",
+                                        "properties": {
+                                            "publicIPAddress": {
+                                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('lbpublicip-v4-Name'))]"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "name": "LBFE-v6",
+                                        "properties": {
+                                            "publicIPAddress": {
+                                                "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('lbpublicip-v6-Name'))]"
+                                            }
+                                        }
+                                    }
+                                ],
+                                "backendAddressPools": [
+                                    {
+                                        "name": "LBBAP-v4"
+                                    },
+                                    {
+                                        "name": "LBBAP-v6"
+                                    }
+                                ],
+                                "loadBalancingRules": [
+                                    {
+                                        "properties": {
+                                            "frontendIPConfiguration": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIpConfigurations', 'loadBalancer', 'LBFE-v4')]"
+                                            },
+                                            "backendAddressPool": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v4')]"
+                                            },
+                                            "protocol": "Tcp",
+                                            "frontendPort": 80,
+                                            "backendPort": 80,
+                                            "idleTimeoutInMinutes": 15
+                                        },
+                                        "name": "lbrule80"
+                                    },
+                                    {
+                                        "properties": {
+                                            "frontendIPConfiguration": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIpConfigurations', 'loadBalancer', 'LBFE-v6')]"
+                                            },
+                                            "backendAddressPool": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v6')]"
+                                            },
+                                            "protocol": "Tcp",
+                                            "frontendPort": 80,
+                                            "backendPort": 80
+                                        },
+                                        "name": "lbrule-v6-80"
+                                    },
+                                    {
+                                        "properties": {
+                                            "frontendIPConfiguration": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIpConfigurations', 'loadBalancer', 'LBFE-v4')]"
+                                            },
+                                            "backendAddressPool": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v4')]"
+                                            },
+                                            "protocol": "Tcp",
+                                            "frontendPort": 8883,
+                                            "backendPort": 8883,
+                                            "idleTimeoutInMinutes": 15
+                                        },
+                                        "name": "lbrule8883"
+                                    },
+                                    {
+                                        "properties": {
+                                            "frontendIPConfiguration": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIpConfigurations', 'loadBalancer', 'LBFE-v6')]"
+                                            },
+                                            "backendAddressPool": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v6')]"
+                                            },
+                                            "protocol": "Tcp",
+                                            "frontendPort": 8883,
+                                            "backendPort": 8883
+                                        },
+                                        "name": "lbrule-v6-8883"
+                                    },
+                                    {
+                                        "properties": {
+                                            "frontendIPConfiguration": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIpConfigurations', 'loadBalancer', 'LBFE-v4')]"
+                                            },
+                                            "backendAddressPool": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v4')]"
+                                            },
+                                            "protocol": "Tcp",
+                                            "frontendPort": 8083,
+                                            "backendPort": 8083,
+                                            "idleTimeoutInMinutes": 15
+                                        },
+                                        "name": "lbrule8083"
+                                    },
+                                    {
+                                        "properties": {
+                                            "frontendIPConfiguration": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIpConfigurations', 'loadBalancer', 'LBFE-v6')]"
+                                            },
+                                            "backendAddressPool": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v6')]"
+                                            },
+                                            "protocol": "Tcp",
+                                            "frontendPort": 8083,
+                                            "backendPort": 8083
+                                        },
+                                        "name": "lbrule-v6-8083"
+                                    },
+                                    {
+                                        "properties": {
+                                            "frontendIPConfiguration": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIpConfigurations', 'loadBalancer', 'LBFE-v4')]"
+                                            },
+                                            "backendAddressPool": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v4')]"
+                                            },
+                                            "protocol": "Tcp",
+                                            "frontendPort": 22,
+                                            "backendPort": 22,
+                                            "idleTimeoutInMinutes": 15
+                                        },
+                                        "name": "lbrule22"
+                                    },
+                                    {
+                                        "properties": {
+                                            "frontendIPConfiguration": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIpConfigurations', 'loadBalancer', 'LBFE-v6')]"
+                                            },
+                                            "backendAddressPool": {
+                                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v6')]"
+                                            },
+                                            "protocol": "Tcp",
+                                            "frontendPort": 22,
+                                            "backendPort": 22
+                                        },
+                                        "name": "lbrule-v6-22"
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "apiVersion": "2019-11-01",
+                            "type": "Microsoft.Network/virtualNetworks",
+                            "name": "VNET",
+                            "location": "[parameters('location')]",
+                            "properties": {
+                                "addressSpace": {
+                                    "addressPrefixes": [
+                                        "[variables('vnetv4AddressRange')]",
+                                        "[variables('vnetv6AddressRange')]"
+                                    ]
+                                },
+                                "subnets": [
+                                    {
+                                        "name": "[variables('subnetName')]",
+                                        "properties": {
+                                            "addressPrefixes": [
+                                                "[variables('subnetv4AddressRange')]",
+                                                "[variables('subnetv6AddressRange')]"
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "apiVersion": "2019-11-01",
+                            "type": "Microsoft.Network/networkSecurityGroups",
+                            "name": "mqttNsg",
+                            "location": "[parameters('location')]",
+                            "properties": {
+                                "securityRules": [
+                                    {
+                                        "name": "HTTP",
+                                        "properties": {
+                                            "description": "Allow HTTP",
+                                            "protocol": "TCP",
+                                            "sourcePortRange": "*",
+                                            "destinationPortRange": "80",
+                                            "sourceAddressPrefix": "*",
+                                            "destinationAddressPrefix": "*",
+                                            "access": "Allow",
+                                            "priority": 1001,
+                                            "direction": "Inbound"
+                                        }
+                                    },
+                                    {
+                                        "name": "allow-all-out",
+                                        "properties": {
+                                            "description": "Allow out All",
+                                            "protocol": "*",
+                                            "sourcePortRange": "*",
+                                            "destinationPortRange": "*",
+                                            "sourceAddressPrefix": "*",
+                                            "destinationAddressPrefix": "*",
+                                            "access": "Allow",
+                                            "priority": 1002,
+                                            "direction": "Outbound"
+                                        }
+                                    },
+                                    {
+                                        "name": "SSH",
+                                        "properties": {
+                                            "description": "Allow SSH",
+                                            "protocol": "Tcp",
+                                            "sourcePortRange": "*",
+                                            "destinationPortRange": "22",
+                                            "sourceAddressPrefix": "CorpNetPublic",
+                                            "destinationAddressPrefix": "*",
+                                            "access": "Deny",
+                                            "priority": 1003,
+                                            "direction": "Inbound"
+                                        }
+                                    },
+                                    {
+                                        "name": "MQTT-TLS",
+                                        "properties": {
+                                            "description": "allow MQTT TLS",
+                                            "protocol": "Tcp",
+                                            "sourcePortRange": "*",
+                                            "destinationPortRange": "8883",
+                                            "sourceAddressPrefix": "*",
+                                            "destinationAddressPrefix": "*",
+                                            "access": "Allow",
+                                            "priority": 1004,
+                                            "direction": "Inbound"
+                                        }
+                                    },
+                                    {
+                                        "name": "MQTT-WebSock",
+                                        "properties": {
+                                            "description": "allow MQTT TLS",
+                                            "protocol": "Tcp",
+                                            "sourcePortRange": "*",
+                                            "destinationPortRange": "8083",
+                                            "sourceAddressPrefix": "*",
+                                            "destinationAddressPrefix": "*",
+                                            "access": "Allow",
+                                            "priority": 1005,
+                                            "direction": "Inbound"
+                                        }
+                                    },
+                                    {
+                                        "name": "allow-MyIpv6App-out",
+                                        "properties": {
+                                            "description": "Allow My IPv6 App",
+                                            "protocol": "Tcp",
+                                            "sourcePortRange": "33819-33829",
+                                            "destinationPortRange": "5000-6000",
+                                            "sourceAddressPrefix": "ace:cab:deca:deed::/64",
+                                            "destinationAddressPrefixes": [
+                                                "cab:cab:aaaa:bbbb::/64",
+                                                "cab:cab:1111:2222::/64"
+                                            ],
+                                            "access": "Allow",
+                                            "priority": 1010,
+                                            "direction": "Outbound"
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "type": "Microsoft.Network/routeTables",
+                            "name": "v6routeTable",
+                            "apiVersion": "2019-11-01",
+                            "location": "[parameters('location')]",
+                            "properties": {
+                                "routes": [
+                                    {
+                                        "name": "v6route",
+                                        "properties": {
+                                            "addressPrefix": "cab:cab::/96",
+                                            "nextHopType": "VirtualAppliance",
+                                            "nextHopIpAddress": "ace:cab:deca:f00d::1"
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "apiVersion": "2019-11-01",
+                            "type": "Microsoft.Network/networkInterfaces",
+                            "name": "[concat(parameters('vmName'),'-nic')]",
+                            "location": "[parameters('location')]",
+                            "dependsOn": [
+                                "[resourceId('Microsoft.Network/virtualNetworks','VNET')]",
+                                "[resourceId('Microsoft.Network/networkSecurityGroups','mqttNsg')]",
+                                "[resourceId('Microsoft.Network/loadBalancers','loadBalancer')]",
+                                "[resourceId('Microsoft.Network/publicIPAddresses',variables('nic0-publicip-v4-Name'))]"
+                            ],
+                            "properties": {
+                                "networkSecurityGroup": {
+                                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups','mqttNsg')]"
+                                },
+                                "ipConfigurations": [
+                                    {
+                                        "name": "ipconfig-v4",
+                                        "properties": {
+                                            "privateIPAllocationMethod": "Dynamic",
+                                            "privateIPAddressVersion": "IPv4",
+                                            "primary": "true",
+                                            "publicIPAddress": {
+                                                "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('nic0-publicip-v4-Name'))]"
+                                            },
+                                            "subnet": {
+                                                "id": "[variables('subnet-id')]"
+                                            },
+                                            "loadBalancerBackendAddressPools": [
+                                                {
+                                                    "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v4')]"
+                                                }
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "name": "ipconfig-v6",
+                                        "properties": {
+                                            "privateIPAllocationMethod": "Dynamic",
+                                            "privateIPAddressVersion": "IPv6",
+                                            "subnet": {
+                                                "id": "[variables('subnet-id')]"
+                                            },
+                                            "loadBalancerBackendAddressPools": [
+                                                {
+                                                    "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v6')]"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "apiVersion": "2019-07-01",
+                            "type": "Microsoft.Compute/virtualMachines",
+                            "name": "[parameters('vmName')]",
+                            "location": "[parameters('location')]",
+                            "dependsOn": [
+                                "[resourceId('Microsoft.Storage/storageAccounts',variables('newStorageAccountName'))]",
+                                "[resourceId('Microsoft.Network/networkInterfaces',concat(parameters('vmName'),'-nic'))]"
+                            ],
+                            "identity": {
+                                "type": "SystemAssigned"
+                            },
+                            "properties": {
+                                "hardwareProfile": {
+                                    "vmSize": "[parameters('VmSize')]"
+                                },
+                                "osProfile": {
+                                    "computerName": "[parameters('vmName')]",
+                                    "adminUsername": "[parameters('adminUserName')]",
+                                    "adminPassword": "[parameters('adminPassword')]",
+                                    "customData": "[base64(variables('cloudinit'))]",
+                                    "linuxConfiguration": {
+                                        "disablePasswordAuthentication": false,
+                                        "ssh": {
+                                            "publicKeys": [
+                                                {
+                                                    "path": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
+                                                    "keyData": "[parameters('adminPublicKey')]"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                                "storageProfile": {
+                                    "imageReference": {
+                                        "publisher": "[variables('imagePublisher')]",
+                                        "offer": "[variables('imageOffer')]",
+                                        "sku": "[variables('imageSku')]",
+                                        "version": "latest"
+                                    },
+                                    "osDisk": {
+                                        "createOption": "FromImage"
+                                    }
+                                },
+                                "networkProfile": {
+                                    "networkInterfaces": [
+                                        {
+                                            "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(parameters('vmName'),'-nic'))]"
+                                        }
+                                    ]
+                                },
+                                "diagnosticsProfile": {
+                                    "bootDiagnostics": {
+                                        "enabled": true,
+                                        "storageUri": "[reference(variables('newStorageAccountName')).primaryEndpoints.blob]"
+                                    }
+                                }
+                            }
+                        }
+                    ],
+                    "outputs": {
+                        "principalId": {
+                            "type": "string",
+                            "value": "[reference(concat('Microsoft.Compute/virtualMachines/', parameters('vmName')),'2019-07-01','Full').identity.principalId]"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "getpublicip",
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2019-08-01",
+            "dependsOn": [
+                "createResources"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "expressionEvaluationOptions": {
+                    "scope": "inner"
+                },
+                "parameters": {
+                    "vmName": {
+                        "value": "[parameters('vmName')]"
+                    },
+                    "location": {
+                        "value": "[parameters('location')]"
+                    }
+                },
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2019-08-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "vmName": {
+                            "type": "string",
+                            "metadata": {
+                                "description": "The name of the of the new VM. Exclusion list: 'admin','administrator'"
+                            }
+                        },
+                        "location": {
+                            "type": "string",
+                            "defaultValue": "[resourceGroup().location]",
+                            "metadata": {
+                                "description": "Location for all resources."
+                            }
+                        }
+                    },
+                    "variables": {
+                        "lbpublicip-v4-Name": "[concat(parameters('vmName'),'-lbpubipv4')]",
+                        "nic0-publicip-v4-Name": "[concat(parameters('vmName'),'-nicpubipv4-0')]",
+                        "lbpublicip-v6-Name": "[concat(parameters('vmName'),'-lbpubipv6')]"
+                    },
+                    "resources": [
+                        {
+                            "apiVersion": "2019-11-01",
+                            "type": "Microsoft.Network/publicIPAddresses",
+                            "name": "[variables('lbpublicip-v4-Name')]",
+                            "location": "[parameters('location')]",
+                            "properties": {
+                                "publicIPAllocationMethod": "Static",
+                                "publicIPAddressVersion": "IPv4"
+                            }
+                        },
+                        {
+                            "apiVersion": "2019-11-01",
+                            "type": "Microsoft.Network/publicIPAddresses",
+                            "name": "[variables('lbpublicip-v6-Name')]",
+                            "location": "[parameters('location')]",
+                            "properties": {
+                                "publicIPAllocationMethod": "Dynamic",
+                                "publicIPAddressVersion": "IPv6"
+                            }
+                        }
+                    ],
+                    "outputs": {
+                        "PublicIPv4Address": {
+                            "type": "string",
+                            "value": "[reference(variables('lbpublicip-v4-Name')).ipAddress]"
+                        },
+                        "PublicIPv6Address": {
+                            "type": "string",
+                            "value": "[reference(variables('lbpublicip-v6-Name')).ipAddress]"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "updatedns",
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2019-11-01",
+            "subscriptionId": "[split(parameters('dnszone-resid'),'/')[2]]",
+            "resourceGroup": "[split(parameters('dnszone-resid'),'/')[4]]",
+            "dependsOn": [
+                "getpublicip"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "expressionEvaluationOptions": {
+                    "scope": "inner"
+                },
+                "parameters": {
+                    "hostname": {
+                        "value": "[parameters('hostname')]"
+                    },
+                    "dnszone": {
+                        "value": "[variables('dnszone')]"
+                    },
+                    "ipv4Address": {
+                        "value": "[reference('getpublicip').outputs.PublicIPv4Address.value]"
+                    },
+                    "ipv6Address": {
+                        "value": "[reference('getpublicip').outputs.PublicIPv6Address.value]"
+                    }
+
+                },
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2019-08-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "hostname": {
+                            "type": "string"
+                        },
+                        "dnszone": {
+                            "type": "string"
+                        },
+                        "ipv4Address": {
+                            "type": "string"
+                        },
+                        "ipv6Address": {
+                            "type": "string"
+                        }
+
+                    },
+                    "variables": {
+                    },
+                    "resources": [
+                        {
+                            "type": "Microsoft.Network/dnszones/a",
+                            "apiVersion": "2018-05-01",
+                            "name": "[concat(parameters('dnszone'), '/', parameters('hostname'))]",
+                            "location": "global",
+                            "properties": {
+                                "TTL": 3600,
+                                "ARecords": [
+                                    {
+                                        "ipv4Address": "[parameters('ipv4Address')]"
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "type": "Microsoft.Network/dnszones/aaaa",
+                            "apiVersion": "2018-05-01",
+                            "name": "[concat(parameters('dnszone'), '/', parameters('hostname'))]",
+                            "location": "global",
+                            "properties": {
+                                "TTL": 3600,
+                                "AAAARecords": [
+                                    {
+                                        "ipv6Address": "[parameters('ipv6Address')]"
+
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "createRBAC",
+            "type": "Microsoft.Resources/deployments",
+            "resourceGroup": "[resourceGroup().name]",
+            "apiVersion": "2019-08-01",
+            "dependsOn": [
+                "createResources"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "expressionEvaluationOptions": {
+                    "scope": "inner"
+                },
+                "parameters": {
+                    "principalId": {
+                        "value": "[reference('Microsoft.Resources/deployments/createResources', '2019-08-01').outputs.principalId.value]"
+                    }
+                },
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "principalId": {
+                            "type": "string",
+                            "metadata": {
+                                "description": "Principal ID to set the access for"
+                            }
+                        },
+                        "rbacname": {
+                            "type": "string",
+                            "defaultValue": "[guid(parameters('principalId'))]"
+                        }
+                    },
+                    "variables": {
+                        "networkcontributor": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', '4d97b98b-1d4f-4787-a291-c67834d212e7')]"
+                    },
+                    "resources": [
+                        {
+                            "type": "Microsoft.Network/networkSecurityGroups/providers/roleAssignments",
+                            "name": "[concat('mqttNsg','/Microsoft.Authorization/', parameters('rbacname'))]",
+                            "apiVersion": "2018-09-01-preview",
+                            "properties": {
+                                "roleDefinitionId": "[variables('networkcontributor')]",
+                                "principalId": "[parameters('principalId')]",
+                                "principalType": "ServicePrincipal"
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

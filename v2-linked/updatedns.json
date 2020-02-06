@@ -1,0 +1,49 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "zone": {
+            "type": "string"
+        },
+        "host": {
+            "type": "string"
+        },
+        "ipv4Address": {
+            "type": "string"
+        },
+        "ipv6Address": {
+            "type": "string"
+        }
+
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Network/dnszones/a",
+            "apiVersion": "2018-05-01",
+            "name": "[concat(parameters('zone'), '/', parameters('host'))]",
+            "location": "global",
+            "properties": {
+                "TTL": 3600,
+                "ARecords": [
+                    {
+                        "ipv4Address": "[parameters('ipv4Address')]"
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/dnszones/aaaa",
+            "apiVersion": "2018-05-01",
+            "name": "[concat(parameters('zone'), '/', parameters('host'))]",
+            "location": "global",
+            "properties": {
+                "TTL": 3600,
+                "AAAARecords": [
+                    {
+                        "ipv6Address": "[parameters('ipv6Address')]"
+                    }
+                ]
+            }
+        }
+    ]
+}

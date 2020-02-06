@@ -1,0 +1,31 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "principalId": {
+            "type": "string",
+            "metadata": {
+                "description": "Principal ID to set the access for"
+            }
+        },
+        "rbacname": {
+            "type": "string",
+            "defaultValue": "[guid(parameters('principalId'))]"
+        }
+    },
+    "variables": {
+        "networkcontributor": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', '4d97b98b-1d4f-4787-a291-c67834d212e7')]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Network/networkSecurityGroups/providers/roleAssignments",
+            "name": "[concat('mqttNsg','/Microsoft.Authorization/', parameters('rbacname'))]",
+            "apiVersion": "2018-09-01-preview",
+            "properties": {
+                "roleDefinitionId": "[variables('networkcontributor')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+            }
+        }
+    ]
+}

@@ -1,0 +1,55 @@
+#cloud-config
+hostname: $host
+package_upgrade: true
+packages:
+  - curl
+  - apt-transport-https
+  - lsb-release
+  - gnupg
+  - mosquitto
+  - mosquitto-clients
+  - certbot
+write_files:
+  - owner: root:root
+    path: /etc/mosquitto/conf.d/default.conf
+    content: |
+      allow_anonymous false
+      password_file /etc/mosquitto/passwd
+
+      listener 1883 localhost
+
+      listener 8883
+      certfile /etc/letsencrypt/live/$fqdn/cert.pem
+      cafile /etc/letsencrypt/live/$fqdn/chain.pem
+      keyfile /etc/letsencrypt/live/$fqdn/privkey.pem
+
+      listener 8083
+      protocol websockets
+      certfile /etc/letsencrypt/live/$fqdn/cert.pem
+      cafile /etc/letsencrypt/live/$fqdn/chain.pem
+      keyfile /etc/letsencrypt/live/$fqdn/privkey.pem
+  - owner: root:root
+    path: /etc/mosquitto/passwd
+    content: |
+      user1:YTQWs9qtPgeTiyDaQLDI
+  - owner: root:root
+    path: /etc/letsencrypt/renewal-hooks/pre/enablehttp.sh
+    content: |
+      az login --identity
+      az network nsg rule update -g $rg --nsg-name mqttNsg --name HTTP --access Allow
+      sleep 30
+  - owner: root:root
+    path: /etc/letsencrypt/renewal-hooks/post/disablehttp.sh
+    content: |
+      az login --identity
+      az network nsg rule update -g $rg --nsg-name mqttNsg --name HTTP --access Deny
+      systemctl restart mosquitto
+runcmd:
+  - mosquitto_passwd -U /etc/mosquitto/passwd
+  - chmod +x /etc/letsencrypt/renewal-hooks/pre/enablehttp.sh
+  - chmod +x /etc/letsencrypt/renewal-hooks/post/disablehttp.sh
+  - curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+  - apt autoremove -y
+  - certbot certonly --non-interactive --agree-tos -m $email --standalone --preferred-challenges http -d $alldomains --dry-run
+  - /etc/letsencrypt/renewal-hooks/post/disablehttp.sh
+  - if [ -f /var/run/reboot-required ]; then reboot ; fi

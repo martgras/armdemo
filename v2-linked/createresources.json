@@ -1,0 +1,397 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "adminUsername": {
+            "type": "string"
+        },
+        "adminPassword": {
+            "type": "securestring"
+        },
+        "adminPublicKey": {
+            "type": "securestring"
+        },
+        "vmName": {
+            "type": "string"
+        },
+        "vmSize": {
+            "type": "string"
+        },
+        "hostname": {
+            "type": "string"
+        },
+        "publicIpHostname": {
+            "type": "string"
+        },
+        "dnszone": {
+            "type": "string"
+        },
+        "letsencypt-account": {
+            "type": "string"
+        },
+        "mqttpwd": {
+            "type": "securestring"
+        },
+        "location": {
+            "type": "string"
+        },
+        "tcpports": {
+            "type": "array"
+        }
+    },
+    "variables": {
+        "url": "https://raw.githubusercontent.com/martgras/armdev/master/mqtt/azuredeploy.json?token=AGEOAXNDM7KCJR5ZNZDTWO26D3DKC",
+        "vnetv4AddressRange": "10.0.0.0/16",
+        "vnetv6AddressRange": "ace:cab:deca::/48",
+        "subnetv4AddressRange": "10.0.0.0/24",
+        "subnetv6AddressRange": "ace:cab:deca:deed::/64",
+        "subnetName": "[concat(parameters('vmName'),'-subnet')]",
+        "newStorageAccountName": "[concat(parameters('vmName'),'storage', uniqueString(resourceGroup().id))]",
+        "subnet-id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'VNET', variables('subnetName'))]",
+        "imagePublisher": "Canonical",
+        "imageOffer": "UbuntuServer",
+        "imageSku": "18.04-LTS",
+        "lbpublicip-v4-Name": "[concat(parameters('vmName'),'-lbpubipv4')]",
+        "lbpublicip-v6-Name": "[concat(parameters('vmName'),'-lbpubipv6')]",
+        "nic0-publicip-v4-Name": "[concat(parameters('vmName'),'-nicpubipv4-0')]",
+        "rg": "[resourceGroup().name]",
+        "fqdn": "[concat(parameters('hostname'),'.',parameters('dnszone'))]",
+        "publicIpFqdn": "[concat(parameters('publicIpHostname'),'.',parameters('location'),'.','cloudapp.azure.com')]",
+        "certificateSubjectNames": "[if(empty(parameters('dnszone')),variables('publicIpFqdn'),concat(variables('fqdn'),',',variables('publicIpFqdn')))]",
+        "cloudinit-template": "#cloud-config\nhostname: $host\npackage_upgrade: true\npackages:\n  - curl\n  - apt-transport-https\n  - lsb-release\n  - gnupg\n  - mosquitto\n  - mosquitto-clients\n  - certbot\nwrite_files:\n  - owner: root:root\n    path: /etc/mosquitto/conf.d/default.conf\n    content: |\n      allow_anonymous false\n      password_file /etc/mosquitto/passwd\n\n      listener 1883 localhost\n\n      listener 8883\n      certfile /etc/letsencrypt/live/$fqdn/cert.pem\n      cafile /etc/letsencrypt/live/$fqdn/chain.pem\n      keyfile /etc/letsencrypt/live/$fqdn/privkey.pem\n\n      listener 8083\n      protocol websockets\n      certfile /etc/letsencrypt/live/$fqdn/cert.pem\n      cafile /etc/letsencrypt/live/$fqdn/chain.pem\n      keyfile /etc/letsencrypt/live/$fqdn/privkey.pem\n  - owner: root:root\n    path: /etc/letsencrypt/renewal-hooks/pre/enablehttp.sh\n    content: |\n      az login --identity\n      az network nsg rule update -g $rg --nsg-name mqttNsg --name HTTP --access Allow\n      sleep 30\n  - owner: root:root\n    path: /etc/mosquitto/passwd\n    content: |\n      user1:$mqttpwd\n  - owner: root:root\n    path: /etc/letsencrypt/renewal-hooks/post/disablehttp.sh\n    content: |\n      az login --identity\n      az network nsg rule update -g $rg --nsg-name mqttNsg --name HTTP --access Deny\n      systemctl restart mosquitto\nruncmd:\n  - mosquitto_passwd -U /etc/mosquitto/passwd\n  - chmod +x /etc/letsencrypt/renewal-hooks/pre/enablehttp.sh\n  - chmod +x /etc/letsencrypt/renewal-hooks/post/disablehttp.sh\n  - curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash\n  - apt autoremove -y\n  - certbot certonly --non-interactive --agree-tos -m $email --standalone --preferred-challenges http -d $alldomains\n  - /etc/letsencrypt/renewal-hooks/post/disablehttp.sh\n  - if [ -f /var/run/reboot-required ]; then reboot ; fi\n",
+        "cloudinit": "[base64(replace(replace(replace(replace(replace(replace(variables('cloudinit-template'),'$fqdn',variables('fqdn')),'$rg',variables('rg')),'$host',parameters('hostname')),'$alldomains',variables('certificateSubjectNames')),'$email',parameters('letsencypt-account')),'$mqttpwd',parameters('mqttpwd')))]",
+        "ipversions": [
+            "-v4",
+            "-v6"
+        ],
+        "lbfront": [
+            "LBFE-v4",
+            "LBFE-v6"
+        ],
+        "lbback": [
+            "LBBAP-v4",
+            "LBBAP-v6"
+        ],
+        "sshPublicKeys": {
+            "publicKeys": [
+                {
+                    "path": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
+                    "keyData": "[parameters('adminPublicKey')]"
+                }
+            ]
+        },
+        "copy": [
+            {
+                "name": "securityRulesIn",
+                "count": "[length(parameters('tcpports'))]",
+                "input": {
+                    "name": "[parameters('tcpports')[copyIndex('securityRulesIn')].name]",
+                    "properties": {
+                        "description": "[parameters('tcpports')[copyIndex('securityRulesIn')].name]",
+                        "protocol": "Tcp",
+                        "sourcePortRange": "*",
+                        "destinationPortRange": "[parameters('tcpports')[copyIndex('securityRulesIn')].port]",
+                        "sourceAddressPrefix": "[if(contains(parameters('tcpports')[copyIndex('securityRulesIn')],'sourceAddressPrefix'),parameters('tcpports')[copyIndex('securityRulesIn')].sourceAddressPrefix,'*')]",
+                        "destinationAddressPrefix": "[if(contains(parameters('tcpports')[copyIndex('securityRulesIn')],'destinationAddressPrefix'),parameters('tcpports')[copyIndex('securityRulesIn')].destinationAddressPrefix,'*')]",
+                        "access": "[parameters('tcpports')[copyIndex('securityRulesIn')].access]",
+                        "priority": "[add(1000,copyIndex('securityRulesIn'))]",
+                        "direction": "Inbound"
+                    }
+                }
+            }
+        ],
+        "securityRulesAdditional": [
+            {
+                "name": "allow-MyIpv6App-out",
+                "properties": {
+                    "description": "Allow My IPv6 App",
+                    "protocol": "Tcp",
+                    "sourcePortRange": "33819-33829",
+                    "destinationPortRange": "5000-6000",
+                    "sourceAddressPrefix": "ace:cab:deca:deed::/64",
+                    "destinationAddressPrefixes": [
+                        "cab:cab:aaaa:bbbb::/64",
+                        "cab:cab:1111:2222::/64"
+                    ],
+                    "access": "Allow",
+                    "priority": 2001,
+                    "direction": "Outbound"
+                }
+            }
+        ],
+        "securityRules": "[concat(variables('securityRulesIn'),variables('securityRulesAdditional'))]"
+    },
+    "resources": [
+        {
+            "apiVersion": "2019-11-01",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[variables('lbpublicip-v4-Name')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "publicIPAllocationMethod": "Static",
+                "publicIPAddressVersion": "IPv4",
+                "dnsSettings": {
+                    "domainNameLabel": "[parameters('publicIpHostname')]"
+                }
+            }
+        },
+        {
+            "apiVersion": "2019-11-01",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[variables('lbpublicip-v6-Name')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "publicIPAllocationMethod": "Dynamic",
+                "publicIPAddressVersion": "IPv6",
+                "dnsSettings": {
+                    "domainNameLabel": "[parameters('publicIpHostname')]"
+                }
+            }
+        },
+        {
+            "apiVersion": "2019-11-01",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[variables('nic0-publicip-v4-Name')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "publicIPAllocationMethod": "Static",
+                "publicIPAddressVersion": "IPv4"
+            }
+        },
+        {
+            "apiVersion": "2019-04-01",
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('newStorageAccountName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "kind": "StorageV2",
+            "properties": {
+
+            }
+        },
+        {
+            "apiVersion": "2019-11-01",
+            "name": "loadBalancer",
+            "type": "Microsoft.Network/loadBalancers",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses',variables('lbpublicip-v6-Name'))]",
+                "[resourceId('Microsoft.Network/publicIPAddresses',variables('lbpublicip-v4-Name'))]"
+            ],
+            "properties": {
+                "frontendIpConfigurations": [
+                    {
+                        "name": "LBFE-v4",
+                        "properties": {
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('lbpublicip-v4-Name'))]"
+                            }
+                        }
+                    },
+                    {
+                        "name": "LBFE-v6",
+                        "properties": {
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('lbpublicip-v6-Name'))]"
+                            }
+                        }
+                    }
+                ],
+                "backendAddressPools": [
+                    {
+                        "name": "LBBAP-v4"
+                    },
+                    {
+                        "name": "LBBAP-v6"
+                    }
+                ],
+                "copy": [
+                    {
+                        "name": "loadBalancingRules",
+                        "count": "[mul(length(parameters('tcpports')),2)]",
+                        "input": {
+                            "properties": {
+                                "frontendIPConfiguration": {
+                                    "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIpConfigurations', 'loadBalancer', variables('lbfront')[mod(copyIndex('loadBalancingRules'),2)])]"
+                                },
+                                "backendAddressPool": {
+                                    "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', variables('lbback')[mod(copyIndex('loadBalancingRules'),2)])]"
+                                },
+                                "protocol": "Tcp",
+                                "frontendPort": "[parameters('tcpports')[div(copyIndex('loadBalancingRules'),2)].port]",
+                                // "backendPort": "[if(equals( parameters('tcpports')[div(copyIndex('loadBalancingRules'),2)].access,'Allow'),parameters('tcpports')[div(copyIndex('loadBalancingRules'),2)].port,'1234')]"
+                                "backendPort": "[parameters('tcpports')[div(copyIndex('loadBalancingRules'),2)].port]"
+                            },
+                            "name": "[concat('lblRule',parameters('tcpports')[div(copyIndex('loadBalancingRules'),2)].name,variables('ipversions')[mod(copyIndex('loadBalancingRules'),2)])]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "2019-11-01",
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "VNET",
+            "location": "[parameters('location')]",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[variables('vnetv4AddressRange')]",
+                        "[variables('vnetv6AddressRange')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[variables('subnetName')]",
+                        "properties": {
+                            "addressPrefixes": [
+                                "[variables('subnetv4AddressRange')]",
+                                "[variables('subnetv6AddressRange')]"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "2019-11-01",
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "name": "mqttNsg",
+            "location": "[parameters('location')]",
+            "properties": {
+                "securityRules": "[variables('securityRules')]"
+            }
+        },
+        {
+            "type": "Microsoft.Network/routeTables",
+            "name": "v6routeTable",
+            "apiVersion": "2019-11-01",
+            "location": "[parameters('location')]",
+            "properties": {
+                "routes": [
+                    {
+                        "name": "v6route",
+                        "properties": {
+                            "addressPrefix": "cab:cab::/96",
+                            "nextHopType": "VirtualAppliance",
+                            "nextHopIpAddress": "ace:cab:deca:f00d::1"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "2019-11-01",
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "[concat(parameters('vmName'),'-nic')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks','VNET')]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups','mqttNsg')]",
+                "[resourceId('Microsoft.Network/loadBalancers','loadBalancer')]",
+                "[resourceId('Microsoft.Network/publicIPAddresses',variables('nic0-publicip-v4-Name'))]"
+            ],
+            "properties": {
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups','mqttNsg')]"
+                },
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig-v4",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "privateIPAddressVersion": "IPv4",
+                            "primary": "true",
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('nic0-publicip-v4-Name'))]"
+                            },
+                            "subnet": {
+                                "id": "[variables('subnet-id')]"
+                            },
+                            "loadBalancerBackendAddressPools": [
+                                {
+                                    "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v4')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "ipconfig-v6",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "privateIPAddressVersion": "IPv6",
+                            "subnet": {
+                                "id": "[variables('subnet-id')]"
+                            },
+                            "loadBalancerBackendAddressPools": [
+                                {
+                                    "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'loadBalancer', 'LBBAP-v6')]"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "2019-07-01",
+            "type": "Microsoft.Compute/virtualMachines",
+            "name": "[parameters('vmName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts',variables('newStorageAccountName'))]",
+                "[resourceId('Microsoft.Network/networkInterfaces',concat(parameters('vmName'),'-nic'))]"
+            ],
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('VmSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[parameters('vmName')]",
+                    "adminUsername": "[parameters('adminUserName')]",
+                    "adminPassword": "[parameters('adminPassword')]",
+                    "customData": "[variables('cloudinit')]",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": "[if(empty(parameters('adminPublicKey')),'true','false')]",
+                        "ssh": "[if(not(empty(parameters('adminPublicKey'))),variables('sshPublicKeys'),json('[]'))]"
+                    }
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "[variables('imagePublisher')]",
+                        "offer": "[variables('imageOffer')]",
+                        "sku": "[variables('imageSku')]",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "createOption": "FromImage"
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(parameters('vmName'),'-nic'))]"
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true,
+                        "storageUri": "[reference(variables('newStorageAccountName')).primaryEndpoints.blob]"
+                    }
+                }
+            }
+        }
+    ],
+    "outputs": {
+        "principalId": {
+            "type": "string",
+            "value": "[reference(concat('Microsoft.Compute/virtualMachines/', parameters('vmName')),'2019-07-01','Full').identity.principalId]"
+        }
+    }
+}

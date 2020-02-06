@@ -1,0 +1,9 @@
+{
+    "$schema": "https://aka.ms/azure-quickstart-templates-metadata-schema#",
+  "type": "QuickStart",
+    "itemDisplayName": "Dual Stack MQTT Server with TLS support",
+    "description": "This will deploy a mqtt server configured for TLS using a Letsencrypt certificate",
+    "summary": "How to use IpV6 and cloud-init",
+    "githubUsername": "martgras",
+    "dateUpdated": "2020-01-15"
+}
