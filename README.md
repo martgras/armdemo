@@ -64,7 +64,8 @@ The VM opens port 80 on demand using az cli, therefore a managed identity is cre
 
 ## Implementation 
 
-There are (currently) 3 variants of the template. 
+There are (currently) 3 variants of the template.  
+Compare v1 and v2 to better understand how *copy* and *if* is used to replace parts of the template that are hardcoded in v1
 
 ### Version 1
 

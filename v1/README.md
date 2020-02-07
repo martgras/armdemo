@@ -172,11 +172,14 @@ Or all in one line
 
 ### Deploy the template 
 
+
+
+
 ````powershell
 New-AzResourceGroup -Location francecentral -Name rg-mqttv1
 
 $vmpwd = ConvertTo-SecureString -AsPlainText -Force  'vjui.mIuzi.921!753'
-$adminPublicKey=ConvertTo-SecureString -AsPlainText -Force 'ssh-rsa AAAAB3...qf43w=='
+$adminPublicKey=ConvertTo-SecureString -AsPlainText -Force 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCGsxMlYySzXjwmkX6JWi/LZ+RVXgXzkr+cfGGG3ENgPY3G3Zk4x31ODnPU/CHecy6fSdT8Fdge8hik1n/GHoHtalCp3jYyL2cX59427dc6mwCA8o5ovbWe2bSqdzEffApOILerFsHmw+mHreHStAMk5PJO7gauk9Zfr++71tveGKTqNMZbL5eJfiHRTT+S05v7tJYNPzNiQjVyr8JgDdrisbHrnhr5NE4h2Y1xg6Mfon9qxuOnjEs2ny090SUpgI6iAIHjxV8mX2vQcLSa/xyu+IRzrdWH2fY7zhjKHIdVn+wSZtaee/TblDEmD2/qO9V2YrSOmqopkdfpVoXR1skR'
 
 New-AzResourceGroupDeployment -Name "deployMqttv1" -ResourceGroupName rg-mqttv1 -TemplateUri 'https://raw.githubusercontent.com/martgras/armdemo/master/v1/azuredeploy.json' `
  -adminUsername mqttboss `
@@ -207,6 +210,8 @@ Parameters              :
                           location              String                     francecentral
                           vmSize                String                     Standard_B1s
 ````
+
+*Note*:  this template needs a ssh public key. The deployment works with the sample key given here but of course can't be used to sign in because you don't have a private key for it. See [Create and manage SSH keys for authentication to a Linux VM in Azure](https://docs.microsoft.com/en-us/azure/virtual-machines/linux/create-ssh-keys-detailed)
 
 
 ### Validate the deployment
